@@ -15,7 +15,7 @@
 //  mlxd: mlxd.cpp
 //     	cc -o mlxd mlxd.cpp $(LIBS)
 //
-// 2019 June 20 --- dmc
+// 2019 June 26 --- dmc
 //
 
 #include <fcntl.h>
@@ -72,14 +72,16 @@ public:
   void ShowHelp(char * cmd){
     printf("This program reads data from Melexis MLX90621\n");
     printf("chip and calculates temperature readings.\n");
-    printf("Needs root permission to read from chip and write to fifo.\n");
+    printf("Needs root permission to read from chip and read/write fifo.\n");
     printf("Command line options listed below.\n");
     printf("%s -h          Show help\n",cmd);
     printf("%s -version    Show version\n",cmd);
     printf("%s -v n        Verbosity level n (n is integer 1,2,3)\n",cmd);
     printf("%s -wf         Write temperature data to fifo\n",cmd);
     printf("%s -t 1        Test mode 1 (write test array to fifo)\n",cmd);
+    printf("%s                (if v==0 displays as mlx array)\n",cmd);
     printf("%s -t 2        Test mode 2 (read array from fifo)\n",cmd);
+    printf("%s                (if v==0 displays as mlx array)\n",cmd);
   }
   int GetHelpLevel(){
     return(HelpLevel);
@@ -138,6 +140,7 @@ public:
 
 class fifo_file{
  private:
+  // Create call to set fifo name
 #define MLX_FIFO "/var/run/mlx.sock"
  public:
   int OpenIO(){
@@ -175,24 +178,6 @@ class fifo_file{
     read(fd, T, ArraySize*4);
     close(fd);
     return(0);
-  }
-  void ShowArray(char * title,float * array, int size){
-    int j;
-    printf("%s :=\n    ",title);
-    for(j=0;j<16;j++)printf("   %02x%c",j,(j==15)?'\n':' ');
-    for(j=0;j<size;j++){
-      if((j%16)==0)printf("%02x: ",j);
-      printf("%05.1f%c",array[j],(((j%16)==15)|(j==(size-1)))?'\n':' ');
-    }
-  }
-  void ShowArray(char * title,int * array, int size){
-    int j;
-    printf("%s :=\n    ",title);
-    for(j=0;j<16;j++)printf("   %02x%c",j,(j==15)?'\n':' ');
-    for(j=0;j<size;j++){
-      if((j%16)==0)printf("%02x: ",j);
-      printf(" %04x%c",array[j],(((j%16)==15)|(j==(size-1)))?'\n':' ');
-    }
   }
   fifo_file(){ }
   ~fifo_file(){ CloseIO(); }
@@ -340,27 +325,60 @@ private:
     }
   }
 
+  void ShowTitleHead(char * title){
+    int j;
+    printf("%s :=\n    ",title);
+    for(j=0;j<16;j++)printf("    %02x%c",j,(j==15)?'\n':' ');
+  }
+public:
+  void ShowArray(char * title,float * array, int size,float scale){
+    int j;
+    ShowTitleHead(title);
+    for(j=0;j<size;j++){
+      if((j%16)==0)printf("%02x: ",j);
+      printf("%06.1f%c",scale*array[j],(((j%16)==15)|(j==(size-1)))?'\n':' ');
+    }
+  }
+  void ShowArray(char * title,float * array, int size){
+    ShowArray(title,array,size,1);
+  }
+  void ShowArray(char * title,int * array, int size){
+    int j;
+    ShowTitleHead(title);
+    for(j=0;j<size;j++){
+      if((j%16)==0)printf("%02x: ",j);
+      printf("  %04x%c",array[j],(((j%16)==15)|(j==(size-1)))?'\n':' ');
+    }
+  }
   void ShowArray(char * title,char * array, int size){
     int j;
-    printf("%s :=\n    ",title);
-    for(j=0;j<16;j++)printf("   %02x%c",j,(j==15)?'\n':' ');
+    ShowTitleHead(title);
     for(j=0;j<size;j++){
       if((j%16)==0)printf("%02x: ",j);
-      printf("   %02x%c",array[j],(((j%16)==15)|(j==(size-1)))?'\n':' ');
+      printf("    %02x%c",array[j],(((j%16)==15)|(j==(size-1)))?'\n':' ');
     }
   }
-  
-  void ShowArray(char * title,float * array, int size){
-    int j;
-    printf("%s :=\n    ",title);
-    for(j=0;j<16;j++)printf("   %02x%c",j,(j==15)?'\n':' ');
+  void ShowArrayMLX(char * title,float * array, int size,float scale){
+    int i,j;
+    ShowTitleHead(title);
     for(j=0;j<size;j++){
+      i=((j&0xf)<<2)+((j&0x30)>>4);
       if((j%16)==0)printf("%02x: ",j);
-      printf("%05.1f%c",array[j],(((j%16)==15)|(j==(size-1)))?'\n':' ');
+      printf("%06.1f%c",scale*array[i],(((j%16)==15)|(j==(size-1)))?'\n':' ');
     }
   }
-  
-public:
+  void ShowArrayMLX(char * title,float * array, int size){
+    ShowArrayMLX(title,array,size,1);
+  }
+  void ShowArrayMLX(char * title,int * array, int size){
+    int i,j;
+    ShowTitleHead(title);
+    for(j=0;j<size;j++){
+      i=((j&0xf)<<2)+((j&0x30)>>4); 
+      if((j%16)==0)printf("%02x: ",j);
+      printf("  %04x%c",array[i],(((j%16)==15)|(j==(size-1)))?'\n':' ');
+    }
+  }
   void ShowCoeff(int Verbose){
     if(Verbose>=2){
       printf("Vth  = %.3e\n",Vth);
@@ -377,10 +395,10 @@ public:
 	char ArrayName[30];
 	strcpy(ArrayName,"Tarray Aij");
 	ShowArray(ArrayName,Aij,64);
-	strcpy(ArrayName,"Tarray Bij");
-	ShowArray(ArrayName,Bij,64);
-	strcpy(ArrayName,"Tarray Cij");
-	ShowArray(ArrayName,Cij,64);
+	strcpy(ArrayName,"Tarray Bij*10^3");
+	ShowArray(ArrayName,Bij,64,1000);
+	strcpy(ArrayName,"Tarray Cij*10^9");
+	ShowArray(ArrayName,Cij,64,1000000000);
       }
     }
   }
@@ -402,7 +420,11 @@ public:
       strcpy(ArrayName,"Tarray");
       ShowArray(ArrayName,irArray,128);
     }
-    if(Verbose>=1){
+    if(Verbose==0){
+      printf("Tamb %2.1f 'C  ",ReadTemp());
+      strcpy(ArrayName,"Array mlx temperature 'C");
+      ShowArrayMLX(ArrayName,TempDeg,64);
+    } else {
       printf("Tamb %2.1f 'C  ",ReadTemp());
       strcpy(ArrayName,"Array temperature 'C");
       ShowArray(ArrayName,TempDeg,64);
@@ -451,11 +473,13 @@ void got_sigint(int sig) {
 int main(int argc, char **argv){
   float FTemperature[64];
   int i,j=0;
-  signal(SIGINT, got_sigint);
   
   if((cl.ParseCommandLine(argc, argv)==0) &
      (cl.GetHelpLevel()==0) &
      !cl.GetShowVersion() ){
+    signal(SIGINT, got_sigint);
+    
+    ////////////////////////////////////////////////////////////////////
     
     if(cl.GetTestLevel()==1){ // Create float point test array and write to fifo
       fifo.OpenIO();
@@ -465,7 +489,11 @@ int main(int argc, char **argv){
 	  FTemperature[i]=i*2.3;
 	}FTemperature[j]=20;
 	fifo.WriteIO(FTemperature,64);
-	if(cl.GetVerbosityLevel()!=0)fifo.ShowArray((char *)"ARRAY",FTemperature,64);
+	if(cl.GetVerbosityLevel()==0){
+	  melexis.ShowArrayMLX((char *)"ARRAYmlx",FTemperature,64);
+	} else{
+	  melexis.ShowArray((char *)"ARRAY",FTemperature,64);
+	}
 	if(j<63){
 	  j++;
 	} else {
@@ -473,14 +501,23 @@ int main(int argc, char **argv){
 	}
 	sleep(1);
       } while(1);
-
+      
+      //////////////////////////////////////////////////////////////////
+      
     } else if(cl.GetTestLevel()==2){ // read and display numbers from fifo
       fifo.OpenIO();
       for(i=0;i<64;i++)FTemperature[i]=0;
       do{
 	fifo.ReadIO(FTemperature,64);
-	fifo.ShowArray((char *)"ARRAY",FTemperature,64);
+	if(cl.GetVerbosityLevel()==0){
+	  melexis.ShowArrayMLX((char *)"ARRAYmlx",FTemperature,64);
+	} else {
+	  melexis.ShowArray((char *)"ARRAY",FTemperature,64);
+	}
       } while(1);
+      
+      //////////////////////////////////////////////////////////////////
+      
     } else {      // readand display temperature
       if(cl.GetWriteFIFO())fifo.OpenIO();
       if(melexis.Init(cl.GetVerbosityLevel())==0){
@@ -495,6 +532,9 @@ int main(int argc, char **argv){
 	  if(cl.GetWriteFIFO())	fifo.WriteIO(FTemperature,64);
 	  sleep(1);
 	} while(1);
+	
+	////////////////////////////////////////////////////////////////
+	
       }
     }
   }
